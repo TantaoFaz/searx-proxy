@@ -1,49 +1,49 @@
 from flask import Flask, request, jsonify
-from bs4 import BeautifulSoup
 import requests
+import xml.etree.ElementTree as ET
 
 app = Flask(__name__)
 
-INSTANCE = "https://searx.fmhy.net"
+INSTANCES = [
+    "https://searx.ox2.fr",
+    "https://searx.sev.monster",
+    "https://searx.fmhy.net",
+]
 HEADERS = {"User-Agent": "Mozilla/5.0"}
+
+def try_rss(instance, q, engines):
+    r = requests.get(
+        f"{instance}/search",
+        params={"q": q, "engines": engines, "format": "rss"},
+        headers=HEADERS,
+        timeout=6
+    )
+    if r.status_code != 200:
+        return None
+    root = ET.fromstring(r.text)
+    ns = {"media": "http://search.yahoo.com/mrss/"}
+    results = []
+    for item in root.findall(".//item"):
+        title = item.findtext("title", "")
+        url   = item.findtext("link", "")
+        desc  = item.findtext("description", "")
+        results.append({"title": title, "url": url, "content": desc, "source": instance})
+    return results
 
 @app.route("/search")
 def search():
     q = request.args.get("q", "").strip()
     engines = request.args.get("engines", "google,duckduckgo")
-
     if not q:
         return jsonify({"error": "missing query"}), 400
-
-    try:
-        r = requests.get(
-            f"{INSTANCE}/search",
-            params={"q": q, "engines": engines},
-            headers=HEADERS,
-            timeout=8
-        )
-        soup = BeautifulSoup(r.text, "html.parser")
-        results = []
-
-        for article in soup.select(".result"):
-            title_el = article.select_one("h3 a")
-            desc_el  = article.select_one(".content")
-            url_el   = article.select_one(".url_wrapper, .url")
-
-            if not title_el:
-                continue
-
-            results.append({
-                "title":   title_el.get_text(strip=True),
-                "url":     title_el.get("href", ""),
-                "content": desc_el.get_text(strip=True) if desc_el else "",
-                "source":  url_el.get_text(strip=True) if url_el else ""
-            })
-
-        return jsonify({"query": q, "results": results})
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    for inst in INSTANCES:
+        try:
+            results = try_rss(inst, q, engines)
+            if results is not None:
+                return jsonify({"query": q, "results": results, "instance": inst})
+        except:
+            continue
+    return jsonify({"error": "all instances failed"}), 503
 
 @app.route("/")
 def index():

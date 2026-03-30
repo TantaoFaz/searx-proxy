@@ -1,1 +1,2 @@
-FROM searxng/searxng:latest
+FROM benbusby/whoogle-search:latest
+EXPOSE 5000
